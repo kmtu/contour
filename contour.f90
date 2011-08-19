@@ -8,18 +8,20 @@ PROGRAM contour
   CHARACTER(LEN=128), DIMENSION(:), ALLOCATABLE :: hist_filename
   CHARACTER(LEN=128) :: command, usage, arg, output_filename
   INTEGER :: num_frames, num_atoms, dummy_int, num_hist_files
-  INTEGER :: i, j, k, n, m, mark
+  INTEGER :: i, j, k, n, m, mark, contour_count
   REAL(KIND=8) :: dummy_real
   INTEGER :: ix, iy
   REAL(KIND=8) :: rx, ry
   INTEGER :: index_x, index_y
   INTEGER, PARAMETER :: num_halothane = 16
   REAL(KIND=8) :: ref_originx, ref_originy, ref_binwidthx, ref_binwidthy
-  INTEGER, DIMENSION(2, 100) :: point
+!  INTEGER, DIMENSION(2, 100) :: point
   REAL(KIND=8) :: middlepointx, middlepointy
   INTEGER, PARAMETER :: num_halothane_atoms = 8
+  INTEGER, PARAMETER :: scale_factor = 10000
   
   call initialize()
+  contour_count = 0 
 
   do m = 1, num_hist_files
      read(hist_fileid(m),*) num_frames, dummy_int, dummy_int, num_atoms
@@ -50,8 +52,8 @@ PROGRAM contour
 
         !caculate the bin width of the reference frame (only once, using 1st frame)
         if (m == 1 .and. i == 1) then
-           ref_originx = (box_sizex / 2) - box_sizex
-           ref_originy = (box_sizey / 2) - box_sizey     
+           ref_originx = -box_sizex / 2.0
+           ref_originy = -box_sizey / 2.0
            ref_binwidthx = box_sizex / num_binx
            ref_binwidthy = box_sizey / num_biny
         end if
@@ -62,13 +64,16 @@ PROGRAM contour
            read(hist_fileid(m),*) ix, iy
            !write(*,*) ix, iy
            call intre2(ix, iy, rx, ry)  !change the mode from integer to real 
-           rx = rx + (box_sizex / 2)
-           index_x = CEILING(rx / (box_sizex / num_binx))
-           ry = ry + (box_sizey / 2)
-           index_y = CEILING(ry / (box_sizey / num_biny))
+!           rx = rx - ref_originx
+           call wrap_coords(rx, 0.0d0, box_sizex) 
+           index_x = CEILING(rx / ref_binwidthx)
+!           ry = ry - ref_originy
+           call wrap_coords(ry, 0.0d0, box_sizey) 
+           index_y = CEILING(ry / ref_binwidthy)
            !write(*,*) rx, ry
            !write(*,*) index_x, index_y
            contour_map(index_x, index_y) = contour_map(index_x, index_y) + 1
+           contour_count = contour_count + 1
            do k = 1, num_halothane_atoms - 2
               read(hist_fileid(m),*) !skip other six atoms
            end do
@@ -243,19 +248,39 @@ CONTAINS
     write(output_id,*) "#number of halothane = ", num_halothane
     write(output_id,*) "#number of bins in x direction = ", num_binx
     write(output_id,*) "#number of bins in y direction = ", num_biny
+    write(output_id,*) "#number of total halothane counted = ", contour_count
     write(output_id,*) "# POINT(1)                POINT(2)                       map  "
     !write the result in file, and the form of the file is which we want
     do i = 1, num_binx
        do j = 1, num_biny
-          middlepointx = ref_originx + (i * ref_binwidthx)- (ref_binwidthx / 2)
-          middlepointy = ref_originy + (j * ref_binwidthy)- (ref_binwidthy / 2)
-          write(output_id,*) middlepointx, middlepointy, contour_map(i, j)
+          middlepointx = ref_originx + (i - 0.5) * ref_binwidthx
+          middlepointy = ref_originy + (j - 0.5) * ref_binwidthy
+          write(output_id,*) middlepointx, middlepointy, DBLE(contour_map(i, j))&
+           & / contour_count * scale_factor
        end do
        write(output_id,*)
     end do
     
-    call get_middlepoint() !confirm the work is ok
+!    call get_middlepoint() !confirm the work is ok
   END SUBROUTINE output
+
+  SUBROUTINE wrap_coords(x, xmin, xmax)
+    !This subroutine transform the coords to lie inside values between xmin and xmax
+    !in a periodic way
+    IMPLICIT NONE
+    REAL(KIND=8), INTENT(INOUT) :: x
+    REAL(KIND=8) :: xmin, xmax
+    REAL(KIND=8) :: temp, xlength
+    INTEGER :: i
+    if (xmin > xmax) then
+       temp = xmax
+       xmax = xmin
+       xmin = temp
+    end if
+    xlength = xmax - xmin
+    x = x - xlength * FLOOR((x - xmin) / xlength)
+  END SUBROUTINE wrap_coords
+
 
   SUBROUTINE get_middlepoint()
     IMPLICIT NONE
