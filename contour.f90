@@ -19,9 +19,11 @@ PROGRAM contour
   REAL(KIND=8) :: middlepointx, middlepointy
   INTEGER, PARAMETER :: num_halothane_atoms = 8
   INTEGER, PARAMETER :: scale_factor = 10000
+  INTEGER :: stat, num_outofbox
   
   call initialize()
   contour_count = 0 
+  num_outofbox = 0
 
   do m = 1, num_hist_files
      read(hist_fileid(m),*) num_frames, dummy_int, dummy_int, num_atoms
@@ -60,8 +62,16 @@ PROGRAM contour
 
         !read halothanes coorordinates
         do j = 1, num_halothane
-           read(hist_fileid(m),*) !skip first atom
-           read(hist_fileid(m),*) ix, iy
+           read(hist_fileid(m),*, IOSTAT=stat) !skip first atom
+           if (stat /=0) then
+              write(*,*) "Error: unable to skip the first atom in file: ", TRIM(ADJUSTL(hist_filename(m)))
+              call EXIT(1)
+           end if
+           read(hist_fileid(m),*, IOSTAT=stat) ix, iy
+           if (stat /=0) then
+              write(*,*) "Error: unable to read coordinates from file: ", TRIM(ADJUSTL(hist_filename(m)))
+              call EXIT(1)
+           end if
            !write(*,*) ix, iy
            call intre2(ix, iy, rx, ry)  !change the mode from integer to real 
 !           rx = rx - ref_originx
@@ -70,9 +80,13 @@ PROGRAM contour
 !           ry = ry - ref_originy
            call wrap_coords(ry, 0.0d0, box_sizey) 
            index_y = CEILING(ry / ref_binwidthy)
-           !write(*,*) rx, ry
-           !write(*,*) index_x, index_y
-           contour_map(index_x, index_y) = contour_map(index_x, index_y) + 1
+!           write(*,*) rx, ry
+!           write(*,*) index_x, index_y
+           if (index_x <= num_binx .AND. index_y <= num_biny) then
+              contour_map(index_x, index_y) = contour_map(index_x, index_y) + 1
+           else
+              num_outofbox = num_outofbox + 1
+           end if
            contour_count = contour_count + 1
            do k = 1, num_halothane_atoms - 2
               read(hist_fileid(m),*) !skip other six atoms
@@ -260,6 +274,11 @@ CONTAINS
        end do
        write(output_id,*)
     end do
+
+    write(*,*) "There are total ", contour_count, " points."
+    if (num_outofbox > 0) then
+        write(*,*) "Warning: there are ", num_outofbox, " point(s) out of box."
+    end if
     
 !    call get_middlepoint() !confirm the work is ok
   END SUBROUTINE output
